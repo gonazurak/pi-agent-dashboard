@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
-import { render, fireEvent } from "@testing-library/react";
+import { render, fireEvent, screen } from "@testing-library/react";
 import React from "react";
 import { TokenStatsBar } from "../TokenStatsBar.js";
 import type { TurnStat } from "../../lib/event-reducer.js";
@@ -17,6 +17,12 @@ const defaultProps = {
 };
 
 describe("TokenStatsBar", () => {
+  it("shows cache reuse percentage and long-context pricing state", () => {
+    render(<TokenStatsBar turnStats={[makeTurn({ input: 250, cacheRead: 750 })]} contextUsage={{ tokens: 300000, contextWindow: 372000 }} tokensIn={250} tokensOut={100} cacheRead={750} cacheWrite={0} cost={1} longContextThreshold={272000} />);
+    expect(screen.getByText("cache 75%")).toBeTruthy();
+    expect(screen.getByTestId("long-context-pricing")).toBeTruthy();
+  });
+
   it("renders butterfly chart with input (blue) and output (purple)", () => {
     const { container } = render(
       <TokenStatsBar turnStats={[makeTurn()]} {...defaultProps} />

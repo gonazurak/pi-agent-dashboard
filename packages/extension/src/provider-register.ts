@@ -215,6 +215,7 @@ export function toModelInfo(m: any): {
   vision?: boolean;
   contextWindow?: number;
   thinkingLevels?: string[];
+  longContextThreshold?: number;
   metadataSource?: "catalog" | "fallback";
 } {
   const provider = m?.provider ?? "";
@@ -236,6 +237,9 @@ export function toModelInfo(m: any): {
     vision: Array.isArray(m?.input) ? m.input.includes("image") : undefined,
     contextWindow: typeof m?.contextWindow === "number" ? m.contextWindow : undefined,
     thinkingLevels,
+    longContextThreshold: typeof m?.cost?.tiers?.[0]?.inputTokensAbove === "number"
+      ? m.cost.tiers[0].inputTokensAbove
+      : undefined,
     metadataSource: source,
   };
 }

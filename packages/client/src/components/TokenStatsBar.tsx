@@ -10,6 +10,7 @@ interface Props {
   cacheRead: number;
   cacheWrite: number;
   cost: number;
+  longContextThreshold?: number;
   onTurnClick?: (turnIndex: number) => void;
   /** Gate butterfly chart + token stats (default true). */
   showStats?: boolean;
@@ -23,7 +24,7 @@ function formatTokens(n: number): string {
   return String(n);
 }
 
-export function TokenStatsBar({ turnStats, contextUsage, tokensIn, tokensOut, cacheRead, cacheWrite, cost, onTurnClick, showStats = true, showContextBar = true }: Props) {
+export function TokenStatsBar({ turnStats, contextUsage, tokensIn, tokensOut, cacheRead, cacheWrite, cost, longContextThreshold, onTurnClick, showStats = true, showContextBar = true }: Props) {
   // Independent normalization per half
   const maxInput = turnStats.reduce(
     (max, t) => Math.max(max, t.input + t.cacheRead),
@@ -40,6 +41,9 @@ export function TokenStatsBar({ turnStats, contextUsage, tokensIn, tokensOut, ca
       : null;
 
   const gradientColor = contextPercent != null ? contextGradientColor(contextPercent) : null;
+  const totalPromptTokens = tokensIn + cacheRead;
+  const cacheHitPercent = totalPromptTokens > 0 ? Math.round((cacheRead / totalPromptTokens) * 100) : 0;
+  const isLongContext = contextUsage?.tokens != null && longContextThreshold != null && contextUsage.tokens > longContextThreshold;
 
   // Latest turn for context bar segment proportions
   const latestTurn = turnStats.length > 0 ? turnStats[turnStats.length - 1] : null;
@@ -61,7 +65,10 @@ export function TokenStatsBar({ turnStats, contextUsage, tokensIn, tokensOut, ca
               <span>↑{formatTokens(tokensOut)}</span>
             </div>
             <div className="flex gap-1.5">
-              {cacheRead > 0 && <span>R{formatTokens(cacheRead)}</span>}
+              {cacheRead > 0 && <>
+                <span>R{formatTokens(cacheRead)}</span>
+                <span title="Prompt tokens served from cache">cache {cacheHitPercent}%</span>
+              </>}
               {cacheWrite > 0 && <span>W{formatTokens(cacheWrite)}</span>}
               {cost > 0 && <span>${cost.toFixed(2)}</span>}
             </div>
@@ -163,6 +170,11 @@ export function TokenStatsBar({ turnStats, contextUsage, tokensIn, tokensOut, ca
               />
             ) : null}
           </div>
+          {isLongContext && (
+            <span data-testid="long-context-pricing" className="rounded bg-amber-500/15 px-1.5 py-0.5 text-amber-400" title={`Input exceeded ${formatTokens(longContextThreshold!)}; long-context pricing applies`}>
+              long-context pricing
+            </span>
+          )}
           <span>{formatTokens(contextUsage.contextWindow)}</span>
         </div>
       )}

@@ -481,6 +481,8 @@ export interface ModelInfo {
   contextWindow?: number;
   /** Thinking levels accepted by this specific model, in display order. */
   thinkingLevels?: string[];
+  /** Input-token boundary where the provider switches to long-context pricing. */
+  longContextThreshold?: number;
   /**
    * Confidence of `reasoning`/`vision`: `"catalog"` when the bridge's
    * `enrichModelMetadata()` probe resolved the model against pi's registry

@@ -1375,6 +1375,7 @@ export default function App() {
             cacheRead={selectedState.cacheRead}
             cacheWrite={selectedState.cacheWrite}
             cost={selectedState.cost}
+            longContextThreshold={modelsMap.get(selectedId ?? "")?.find((candidate) => `${candidate.provider}/${candidate.id}` === (selectedState.model ?? selectedSession?.model))?.longContextThreshold}
             onTurnClick={(turnIndex) => chatViewRef.current?.scrollToTurn(turnIndex)}
             showStats={showStats}
             showContextBar={showContextBar}
