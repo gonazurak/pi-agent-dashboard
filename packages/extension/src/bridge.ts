@@ -34,6 +34,7 @@ import { registerAskUserTool } from "./ask-user-tool.js";
 import { decodeMultiselectAnswer } from "./multiselect-decode.js";
 import { activate as activateProviderRegister, onProviderChanged, reloadProviders, buildProviderCatalogue, toModelInfo } from "./provider-register.js";
 import { activate as activateRoleManager } from "./role-manager.js";
+import { activateCodexFast56 } from "./codex-fast-56.js";
 import type { FlowInfo } from "@blackbelt-technology/pi-dashboard-shared/types.js";
 import { startMetricsMonitor, stopMetricsMonitor, collectMetrics } from "./process-metrics.js";
 import { scanChildProcesses, getOwnPgid } from "./process-scanner.js";
@@ -108,6 +109,9 @@ export default function (pi: ExtensionAPI) {
     // Settings → Roles. Relocated from pi-flows per OpenSpec change
     // `adopt-model-resolve-handler-and-roles-ownership`.
     activateRoleManager(pi);
+
+    // Complement the community Fast plugin for the Codex-only GPT-5.6 family.
+    activateCodexFast56(pi);
 
     // Anthropic-messages payload transforms (system prompt rewrite + tool
     // filter/remap) are handled by the installed @benvargas/pi-claude-code-use

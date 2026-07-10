@@ -1137,7 +1137,7 @@ export function SettingsPanel({ availableModels, onMessage, onBack }: {
                     onChange={(v) => update((c) => { c.codexFast = { ...c.codexFast, enabled: v }; })}
                   />
                   <p className="mt-1 text-xs text-[var(--text-tertiary)]">
-                    {i18nT("auto.codex_fast_sends_priority_tier", undefined, "New openai-codex gpt-5.4 and gpt-5.5 sessions use the pi-codex-fast extension to request OpenAI priority service tier. Active sessions keep their current plugin state.")}
+                    {i18nT("auto.codex_fast_sends_priority_tier", undefined, "New openai-codex GPT-5.4, GPT-5.5, and GPT-5.6 family sessions request the Codex fast service tier. Active sessions keep their current plugin state.")}
                   </p>
                 </Section>
                 <SettingsSectionSlot tab="providers" />
