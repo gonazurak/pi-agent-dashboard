@@ -74,6 +74,8 @@ export function StatusBar({
   let statusIcon = mdiLoading;
   let toolHighlight = false;
 
+  const activeModel = models?.find((candidate) => `${candidate.provider}/${candidate.id}` === model);
+
   if (status === "streaming") {
     if (currentTool) {
       statusLabel = t("status.runningTool", { tool: currentTool }, `Running ${currentTool}...`);
@@ -99,7 +101,7 @@ export function StatusBar({
           </>
         )}
         <ModelSelector current={model} models={models} onSelect={onSelectModel} favorites={favorites} onToggleFavorite={onToggleFavorite} />
-        <ThinkingLevelSelector current={thinkingLevel} onSelect={onSelectThinkingLevel} />
+        <ThinkingLevelSelector current={thinkingLevel} levels={activeModel?.thinkingLevels} onSelect={onSelectThinkingLevel} />
         {actions && (
           <>
             <span aria-hidden="true" className="inline-block h-3 w-px bg-[var(--border-secondary)] mx-1 flex-shrink-0" />

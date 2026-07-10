@@ -7,10 +7,12 @@ const THINKING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh", "ma
 
 interface Props {
   current?: string;
+  levels?: readonly string[];
   onSelect: (level: string) => void;
 }
 
-export function ThinkingLevelSelector({ current, onSelect }: Props) {
+export function ThinkingLevelSelector({ current, levels, onSelect }: Props) {
+  const availableLevels = levels?.length ? levels : THINKING_LEVELS;
   const [open, setOpen] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
@@ -45,7 +47,7 @@ export function ThinkingLevelSelector({ current, onSelect }: Props) {
           data-testid="thinking-level-dropdown"
         >
           <div className="overflow-y-auto" style={{ maxHeight }}>
-            {THINKING_LEVELS.map((level) => (
+            {availableLevels.map((level) => (
               <button
                 key={level}
                 onClick={() => {

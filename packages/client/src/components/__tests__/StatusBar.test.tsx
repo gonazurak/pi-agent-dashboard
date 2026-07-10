@@ -113,6 +113,16 @@ describe("ThinkingLevelSelector", () => {
     expect(screen.getByTestId("thinking-level-button").textContent).toContain("off");
   });
 
+  it("shows only thinking levels supported by the active model", () => {
+    const capabilityModels: ModelInfo[] = [
+      { provider: "openai-codex", id: "gpt-5.6-sol", thinkingLevels: ["off", "high", "xhigh", "max"] },
+      { provider: "openai-codex", id: "gpt-5.5", thinkingLevels: ["off", "high", "xhigh"] },
+    ];
+    render(<StatusBar model="openai-codex/gpt-5.5" models={capabilityModels} status="idle" onSelectModel={() => {}} onSelectThinkingLevel={() => {}} />);
+    fireEvent.click(screen.getByTestId("thinking-level-button"));
+    expect(screen.getByTestId("thinking-level-dropdown").textContent).not.toContain("max");
+  });
+
   it("opens dropdown and calls onSelectThinkingLevel", () => {
     const onSelect = vi.fn();
     render(<StatusBar model="anthropic/claude-4" models={models} status="idle" onSelectModel={() => {}} onSelectThinkingLevel={onSelect} />);

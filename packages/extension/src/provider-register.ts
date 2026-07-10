@@ -214,11 +214,20 @@ export function toModelInfo(m: any): {
   reasoning?: boolean;
   vision?: boolean;
   contextWindow?: number;
+  thinkingLevels?: string[];
   metadataSource?: "catalog" | "fallback";
 } {
   const provider = m?.provider ?? "";
   const id = m?.id ?? "";
   const source = enrichmentSource.get(`${provider}/${id}`) ?? "catalog";
+  const thinkingLevelMap = m?.thinkingLevelMap && typeof m.thinkingLevelMap === "object"
+    ? m.thinkingLevelMap as Record<string, string | null>
+    : {};
+  const thinkingLevels = m?.reasoning === true
+    ? ["off", "minimal", "low", "medium", "high", "xhigh", "max"].filter(
+        (level) => !(level in thinkingLevelMap) || thinkingLevelMap[level] !== null,
+      )
+    : ["off"];
   return {
     provider,
     id,
@@ -226,6 +235,7 @@ export function toModelInfo(m: any): {
     reasoning: typeof m?.reasoning === "boolean" ? m.reasoning : undefined,
     vision: Array.isArray(m?.input) ? m.input.includes("image") : undefined,
     contextWindow: typeof m?.contextWindow === "number" ? m.contextWindow : undefined,
+    thinkingLevels,
     metadataSource: source,
   };
 }

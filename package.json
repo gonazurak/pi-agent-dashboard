@@ -52,7 +52,7 @@
     "postinstall": "node scripts/maybe-patch-package.cjs && node scripts/fix-pty-permissions.cjs",
     "dev": "npm run dev --workspace=@blackbelt-technology/pi-dashboard-web",
     "build": "npm run build --workspace=@blackbelt-technology/pi-dashboard-web",
-    "test": "HOME=$(mktemp -d -t pi-test-XXXXXX) NODE_OPTIONS=\"--localstorage-file=$(mktemp -t pi-test-ls-XXXXXX)\" vitest run",
+    "test": "HOME=$(mktemp -d -t pi-test-XXXXXX) NODE_ENV=test NODE_OPTIONS=\"--localstorage-file=$(mktemp -t pi-test-ls-XXXXXX)\" vitest run",
     "test:watch": "HOME=$(mktemp -d -t pi-test-XXXXXX) NODE_OPTIONS=\"--localstorage-file=$(mktemp -t pi-test-ls-XXXXXX)\" vitest",
     "generate:plugin-registry": "node scripts/generate-plugin-registry.mjs",
     "lint": "tsc --noEmit",

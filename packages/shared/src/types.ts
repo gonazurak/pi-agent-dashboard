@@ -479,6 +479,8 @@ export interface ModelInfo {
   vision?: boolean;
   /** From `Model.contextWindow`. */
   contextWindow?: number;
+  /** Thinking levels accepted by this specific model, in display order. */
+  thinkingLevels?: string[];
   /**
    * Confidence of `reasoning`/`vision`: `"catalog"` when the bridge's
    * `enrichModelMetadata()` probe resolved the model against pi's registry
