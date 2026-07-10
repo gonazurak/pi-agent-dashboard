@@ -25,6 +25,16 @@ describe("ThinkingBlock", () => {
     expect(renderToStaticMarkup(<ThinkingBlock content={"  \n\t  "} defaultExpanded />)).toBe("");
   });
 
+  it("renders immediately while streaming before the first text delta", () => {
+    const html = renderToStaticMarkup(
+      <ThemeProvider>
+        <ThinkingBlock content="" isStreaming />
+      </ThemeProvider>,
+    );
+    expect(html).toContain("Thinking");
+    expect(html).toContain("Working through the next step");
+  });
+
   it("renders reasoning when content has visible text", () => {
     const html = renderToStaticMarkup(
       <ThemeProvider>

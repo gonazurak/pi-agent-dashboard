@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { Icon } from "@mdi/react";
 import { mdiChevronRight, mdiChevronDown, mdiHeadLightbulb } from "@mdi/js";
 import { MarkdownContent } from "./MarkdownContent.js";
@@ -14,10 +14,21 @@ interface Props {
 }
 
 export function ThinkingBlock({ content, isStreaming, defaultExpanded = false, startedAt, duration }: Props) {
-  const [expanded, setExpanded] = useState(defaultExpanded);
+  const [expanded, setExpanded] = useState(defaultExpanded || Boolean(isStreaming));
+  const bodyRef = useRef<HTMLDivElement>(null);
   const hasContent = content.trim().length > 0;
 
-  if (!hasContent) return null;
+  useEffect(() => {
+    if (isStreaming) setExpanded(true);
+  }, [isStreaming]);
+
+  useEffect(() => {
+    if (isStreaming && expanded && bodyRef.current) {
+      bodyRef.current.scrollTop = bodyRef.current.scrollHeight;
+    }
+  }, [content, expanded, isStreaming]);
+
+  if (!hasContent && !isStreaming) return null;
 
   return (
     <div className="mx-4 border-l-2 border-purple-500/30 pl-3">
@@ -29,7 +40,7 @@ export function ThinkingBlock({ content, isStreaming, defaultExpanded = false, s
           <Icon path={mdiHeadLightbulb} size={0.55} />
         </span>
         <span className="truncate">
-          {i18nT("auto.reasoning", undefined, "Reasoning")}
+          {isStreaming ? i18nT("auto.thinking", undefined, "Thinking") : i18nT("auto.reasoning", undefined, "Reasoning")}
           {isStreaming && <span className="ml-1 animate-pulse">…</span>}
         </span>
         <ElapsedBadge startedAt={startedAt} duration={duration} />
@@ -38,8 +49,12 @@ export function ThinkingBlock({ content, isStreaming, defaultExpanded = false, s
         </span>
       </button>
       {expanded && (
-        <div className="mt-1 ml-4 p-2 bg-purple-500/5 rounded-xl shadow-md border border-purple-500/10 text-xs text-[var(--text-secondary)] overflow-x-auto max-h-[400px] overflow-y-auto">
-          <MarkdownContent content={content} />
+        <div ref={bodyRef} className="mt-1 ml-4 p-2 bg-purple-500/5 rounded-xl shadow-md border border-purple-500/10 text-xs text-[var(--text-secondary)] overflow-x-auto max-h-[400px] overflow-y-auto">
+          {hasContent ? (
+            <MarkdownContent content={content} />
+          ) : (
+            <span className="text-[var(--text-tertiary)]">{i18nT("auto.thinking_waiting", undefined, "Working through the next step&")}</span>
+          )}
           {isStreaming && (
             <span className="inline-block w-1.5 h-3 bg-purple-400/50 animate-pulse ml-0.5" />
           )}

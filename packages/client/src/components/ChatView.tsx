@@ -559,7 +559,7 @@ export const ChatView = forwardRef<ChatViewHandle, Props>(function ChatView({ se
       })}
 
       {/* Streaming thinking */}
-      {state.streamingThinking && prefs.reasoning && (
+      {(state.isThinking || state.streamingThinking) && prefs.reasoning && (
         <ThinkingBlock
           content={state.streamingThinking}
           isStreaming

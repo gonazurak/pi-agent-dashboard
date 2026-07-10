@@ -658,6 +658,7 @@ describe("thinking events", () => {
       },
     });
     expect(state.streamingThinking).toBe("");
+    expect(state.isThinking).toBe(true);
   });
 
   it("should accumulate thinking deltas", () => {
@@ -717,6 +718,7 @@ describe("thinking events", () => {
       },
     });
     expect(state.streamingThinking).toBe("");
+    expect(state.isThinking).toBe(false);
     expect(state.messages).toHaveLength(1);
     expect(state.messages[0].role).toBe("thinking");
     expect(state.messages[0].content).toBe("Deep reasoning here");

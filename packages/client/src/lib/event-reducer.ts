@@ -147,6 +147,8 @@ export interface SessionState {
   toolCalls: Map<string, ToolCallState>;
   streamingText: string;
   streamingThinking: string;
+  /** True from thinking_start until thinking_end, even before the first delta. */
+  isThinking?: boolean;
   /** Epoch ms when current thinking block started (for live counter) */
   thinkingStartedAt?: number;
   isStreaming: boolean;
@@ -268,6 +270,7 @@ export function createInitialState(): SessionState {
     toolCalls: new Map(),
     streamingText: "",
     streamingThinking: "",
+    isThinking: false,
     isStreaming: false,
     tokensIn: 0,
     tokensOut: 0,
@@ -1033,10 +1036,12 @@ export function reduceEvent(state: SessionState, event: DashboardEvent): Session
       if (assistantEvent) {
         if (assistantEvent.type === "thinking_start") {
           next.streamingThinking = "";
+          next.isThinking = true;
           next.thinkingStartedAt = event.timestamp;
           break;
         }
         if (assistantEvent.type === "thinking_delta") {
+          next.isThinking = true;
           next.streamingThinking = next.streamingThinking + (assistantEvent.delta ?? "");
           break;
         }
@@ -1056,6 +1061,7 @@ export function reduceEvent(state: SessionState, event: DashboardEvent): Session
             ];
           }
           next.streamingThinking = "";
+          next.isThinking = false;
           next.thinkingStartedAt = undefined;
           break;
         }
