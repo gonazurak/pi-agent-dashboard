@@ -119,7 +119,7 @@ export function hasOpenSpecRoot(cwd: string): boolean {
 export interface DirectoryService {
   knownDirectories(): string[];
   discoverSessions(cwd: string): DiscoveredSession[];
-  loadSessionEvents(sessionId: string, sessionFile: string, knownContextWindow?: number): Promise<LoadResult>;
+  loadSessionEvents(sessionId: string, sessionFile: string, knownContextWindow?: number, maxEvents?: number, closeOpenToolCalls?: boolean): Promise<LoadResult>;
   /**
    * Cancel an in-flight hydration for `sessionId` (e.g. on unsubscribe before
    * it resolves). No-op when no load is in flight. The cancelled load's
@@ -296,6 +296,7 @@ export function createDirectoryService(
 
   // In-progress session loads for dedup
   const loadingSet = new Set<string>();
+  const inFlightLoadResults = new Map<string, Promise<LoadResult>>();
 
   // Lazy session-load worker pool. Constructed on first `loadSessionEvents`;
   // disposed on `stopPolling`. `useLoadWorker === false` → in-process-only
@@ -330,51 +331,61 @@ export function createDirectoryService(
     return discoverSessionsForCwd(cwd);
   }
 
-  async function loadSessionEvents(sessionId: string, sessionFile: string, knownContextWindow?: number): Promise<LoadResult> {
+  async function loadSessionEvents(sessionId: string, sessionFile: string, knownContextWindow?: number, maxEvents?: number, closeOpenToolCalls?: boolean): Promise<LoadResult> {
     if (loadingSet.has(sessionId)) {
+      const existing = inFlightLoadResults.get(sessionId);
+      if (existing) return existing;
       return { success: false, events: [], error: "already_loading" };
     }
     loadingSet.add(sessionId);
-    // Instrumentation only — never alters the returned LoadResult. fileBytes
-    // is best-effort (stat may race a delete). entry/event counts default to
-    // 0 on the failure path. See change: instrument-session-hydration-timing.
-    const start = performance.now();
-    let fileBytes = 0;
-    try {
-      fileBytes = fs.statSync(sessionFile).size;
-    } catch {
-      // ignore — fileBytes stays 0
-    }
-    let entryCount = 0;
-    let eventCount = 0;
-    // Parse + replay run in a worker_threads worker (off the main loop) when
-    // `useLoadWorker` is on; the pool falls back in-process on
-    // spawn/crash/timeout. `cancelLoad(sessionId)` drops the job via this
-    // jobId. See change: offload-session-events-load-to-worker.
-    const pool = ensureLoadWorkerPool();
-    const { jobId, result } = pool.load({ sessionId, sessionFile, knownContextWindow });
-    inFlightLoadJobs.set(sessionId, jobId);
-    try {
-      const out = await result;
-      entryCount = out.entryCount ?? 0;
-      eventCount = out.events.length;
-      if (out.success) return { success: true, events: out.events };
-      return { success: false, events: [], error: out.error };
-    } finally {
-      loadingSet.delete(sessionId);
-      inFlightLoadJobs.delete(sessionId);
-      // Instrumentation must never change the load outcome — isolate any
-      // recorder/logging throw so it can't reject a successful LoadResult.
+    let loadPromise: Promise<LoadResult>;
+    loadPromise = (async (): Promise<LoadResult> => {
+      // Instrumentation only — never alters the returned LoadResult. fileBytes
+      // is best-effort (stat may race a delete). entry/event counts default to
+      // 0 on the failure path. See change: instrument-session-hydration-timing.
+      const start = performance.now();
+      let fileBytes = 0;
       try {
-        const wallMs = performance.now() - start;
-        hydrationMetrics?.record({ sessionId, wallMs, fileBytes, entryCount, eventCount, at: Date.now() });
-        if (wallMs > HYDRATION_SLOW_WARN_MS) {
-          console.warn(`[hydration] slow load: ${Math.round(wallMs)}ms (session=${sessionId} bytes=${fileBytes})`);
-        }
+        fileBytes = fs.statSync(sessionFile).size;
       } catch {
-        // swallow — measurement-only path
+        // ignore — fileBytes stays 0
       }
-    }
+      let entryCount = 0;
+      let eventCount = 0;
+      // Parse + replay run in a worker_threads worker (off the main loop) when
+      // `useLoadWorker` is on; the pool falls back in-process on
+      // spawn/crash/timeout. `cancelLoad(sessionId)` drops the job via this
+      // jobId. See change: offload-session-events-load-to-worker.
+      const pool = ensureLoadWorkerPool();
+      const { jobId, result } = pool.load({ sessionId, sessionFile, knownContextWindow, maxEvents, closeOpenToolCalls });
+      inFlightLoadJobs.set(sessionId, jobId);
+      try {
+        const out = await result;
+        entryCount = out.entryCount ?? 0;
+        eventCount = out.events.length;
+        if (out.success) return { success: true, events: out.events };
+        return { success: false, events: [], error: out.error };
+      } finally {
+        loadingSet.delete(sessionId);
+        inFlightLoadJobs.delete(sessionId);
+        if (inFlightLoadResults.get(sessionId) === loadPromise) {
+          inFlightLoadResults.delete(sessionId);
+        }
+        // Instrumentation must never change the load outcome — isolate any
+        // recorder/logging throw so it can't reject a successful LoadResult.
+        try {
+          const wallMs = performance.now() - start;
+          hydrationMetrics?.record({ sessionId, wallMs, fileBytes, entryCount, eventCount, at: Date.now() });
+          if (wallMs > HYDRATION_SLOW_WARN_MS) {
+            console.warn(`[hydration] slow load: ${Math.round(wallMs)}ms (session=${sessionId} bytes=${fileBytes})`);
+          }
+        } catch {
+          // swallow — measurement-only path
+        }
+      }
+    })();
+    inFlightLoadResults.set(sessionId, loadPromise);
+    return loadPromise;
   }
 
   function cancelLoad(sessionId: string): void {

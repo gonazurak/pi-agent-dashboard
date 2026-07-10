@@ -213,6 +213,30 @@ describe("DirectoryService", () => {
       expect(result.success).toBe(false);
       expect(result.error).toBe("file_not_found");
     });
+
+    it("shares an in-flight session load instead of returning already_loading", async () => {
+      const { loadSessionEntries } = await import("../session-file-reader.js");
+      const { replayEntriesAsEvents } = await import("@blackbelt-technology/pi-dashboard-shared/state-replay.js");
+
+      (loadSessionEntries as any).mockReturnValue([{ type: "message", message: { role: "user", content: "hi" } }]);
+      (replayEntriesAsEvents as any).mockReturnValue([
+        { type: "event_forward", sessionId: "s1", event: { eventType: "message_start", timestamp: 1, data: {} } },
+      ]);
+
+      const stateStore = createMockPreferencesStore();
+      const sessionManager = createMockSessionManager();
+      service = createDirectoryService(stateStore, sessionManager, undefined, { useLoadWorker: false });
+      const callsBefore = (loadSessionEntries as any).mock.calls.length;
+
+      const first = service.loadSessionEvents("s1", "/path/to/session.jsonl");
+      const second = service.loadSessionEvents("s1", "/path/to/session.jsonl");
+      const results = await Promise.all([first, second]);
+
+      expect(results.every((result) => result.success)).toBe(true);
+      expect(results.every((result) => result.events.length === 1)).toBe(true);
+      expect(loadSessionEntries).toHaveBeenCalledTimes(callsBefore + 1);
+      expect(results.some((result) => result.error === "already_loading")).toBe(false);
+    });
   });
 
   describe("getOpenSpecData / refreshOpenSpec", () => {

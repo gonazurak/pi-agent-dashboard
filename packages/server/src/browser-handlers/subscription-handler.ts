@@ -9,10 +9,58 @@ import { pluginIntentCache } from "../plugin-intent-cache.js";
 import type { StoredEvent } from "../memory-event-store.js";
 
 const REPLAY_BATCH_SIZE = 50;
-/** Max events to replay per session subscription (0 = unlimited) */
-const MAX_REPLAY_EVENTS = 0;
+/** Max events to replay per session subscription (0 = unlimited). */
+function readMaxReplayEvents(): number {
+  const raw = process.env.PI_DASHBOARD_MAX_REPLAY_EVENTS;
+  if (!raw) return 1000;
+  const parsed = Number.parseInt(raw, 10);
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : 1000;
+}
+const MAX_REPLAY_EVENTS = readMaxReplayEvents();
 /** Max buffered bytes before pausing replay sends (1MB) */
 const BACKPRESSURE_THRESHOLD = 1_024 * 1_024;
+const CHAT_REPLAY_ANCHOR_EVENTS = new Set([
+  "message_start",
+  "message_end",
+  "tool_execution_start",
+  "tool_execution_end",
+]);
+
+function limitReplayEvents(events: StoredEvent[]): StoredEvent[] {
+  if (MAX_REPLAY_EVENTS > 0 && events.length > MAX_REPLAY_EVENTS) {
+    return events.slice(events.length - MAX_REPLAY_EVENTS);
+  }
+  return events;
+}
+
+function hasChatReplayAnchor(events: StoredEvent[]): boolean {
+  return events.some((entry) => CHAT_REPLAY_ANCHOR_EVENTS.has(entry.event.eventType));
+}
+
+function shouldUsePersistedReplayFallback(replayEvents: StoredEvent[]): boolean {
+  return replayEvents.length > 0 && !hasChatReplayAnchor(replayEvents);
+}
+
+function toStoredReplay(events: Array<{ eventType: string; timestamp: number; data: Record<string, unknown> }>): StoredEvent[] {
+  return events.map((event, index) => ({ seq: index + 1, event }));
+}
+
+function sendEventContinuations(
+  ws: WebSocket,
+  sessionId: string,
+  stored: StoredEvent[],
+  sendTo: (ws: WebSocket, msg: ServerToBrowserMessage) => void,
+): void {
+  for (const entry of stored) {
+    if (ws.readyState !== ws.OPEN) return;
+    sendTo(ws, {
+      type: "event",
+      sessionId,
+      seq: entry.seq,
+      event: entry.event,
+    });
+  }
+}
 
 /**
  * Send stored events to a WebSocket in batches with backpressure handling.
@@ -178,34 +226,62 @@ export function handleSubscribe(
   if (eventStore.hasEvents(msg.sessionId)) {
     const lastSeq = msg.lastSeq ?? 0;
     const maxSeq = eventStore.getMaxSeq(msg.sessionId);
+    const session = sessionManager.get(msg.sessionId);
+
+    const replayEvents = async (events: StoredEvent[], catchUpAfterSeq?: number) => {
+      replaySessionAssets(ws, msg.sessionId, ctx);
+      if (events.length > 0) {
+        markReplaying(ws, msg.sessionId);
+      }
+      const lastSent = await sendEventBatches(ws, msg.sessionId, events, sendTo);
+      if (events.length > 0) {
+        clearReplaying(ws, msg.sessionId, catchUpAfterSeq ?? lastSent);
+      }
+      replayPendingUiRequests(ws, msg.sessionId);
+      replayUiState(ws, msg.sessionId, ctx);
+    };
+
+    const replayPersistedBaseThenLiveTail = async (persisted: StoredEvent[], liveTail: StoredEvent[]) => {
+      replaySessionAssets(ws, msg.sessionId, ctx);
+      markReplaying(ws, msg.sessionId);
+      await sendEventBatches(ws, msg.sessionId, persisted, sendTo);
+      sendEventContinuations(ws, msg.sessionId, liveTail, sendTo);
+      clearReplaying(ws, msg.sessionId, maxSeq);
+      replayPendingUiRequests(ws, msg.sessionId);
+      replayUiState(ws, msg.sessionId, ctx);
+    };
+
+    const replayWithPersistedFallback = (events: StoredEvent[], allowFallback: boolean): boolean => {
+      if (!allowFallback || !directoryService || !session?.sessionFile || !shouldUsePersistedReplayFallback(events)) {
+        return false;
+      }
+      const closeOpenToolCalls = session.status === "ended";
+      directoryService.loadSessionEvents(msg.sessionId, session.sessionFile, session.contextWindow, MAX_REPLAY_EVENTS, closeOpenToolCalls)
+        .then(async (result) => {
+          if (result.success && result.events.length > 0) {
+            await replayPersistedBaseThenLiveTail(toStoredReplay(result.events), events);
+            return;
+          }
+          await replayEvents(events);
+        })
+        .catch(async () => {
+          await replayEvents(events);
+        });
+      return true;
+    };
 
     // Stale lastSeq: client has higher seq than server (e.g. server restarted)
     if (lastSeq > 0 && lastSeq > maxSeq) {
       sendTo(ws, { type: "session_state_reset", sessionId: msg.sessionId });
       // Full replay from seq 1
-      let events = eventStore.getEvents(msg.sessionId, 1);
-      if (MAX_REPLAY_EVENTS > 0 && events.length > MAX_REPLAY_EVENTS) {
-        events = events.slice(events.length - MAX_REPLAY_EVENTS);
+      const allEvents = eventStore.getEvents(msg.sessionId, 1);
+      const events = limitReplayEvents(allEvents);
+      if (!replayWithPersistedFallback(events, true)) {
+        replayEvents(events);
       }
-      // Replay asset registry BEFORE events so pi-asset:<hash> tokens in
-      // message_update / message_end resolve on first reduce.
-      // See change: chat-markdown-local-images-and-math.
-      replaySessionAssets(ws, msg.sessionId, ctx);
-      markReplaying(ws, msg.sessionId);
-      sendEventBatches(ws, msg.sessionId, events, sendTo).then((lastSent) => {
-        clearReplaying(ws, msg.sessionId, lastSent);
-        replayPendingUiRequests(ws, msg.sessionId);
-        replayUiState(ws, msg.sessionId, ctx);
-      });
     } else {
-      let events = eventStore.getEvents(msg.sessionId, lastSeq + 1);
-      if (MAX_REPLAY_EVENTS > 0 && events.length > MAX_REPLAY_EVENTS) {
-        events = events.slice(events.length - MAX_REPLAY_EVENTS);
-      }
-      // Replay asset registry on every subscribe (delta or full). Cheap when
-      // empty; assets already known to the client are simply re-overwritten
-      // with identical bytes. See change: chat-markdown-local-images-and-math.
-      replaySessionAssets(ws, msg.sessionId, ctx);
+      const allEvents = eventStore.getEvents(msg.sessionId, lastSeq + 1);
+      const events = limitReplayEvents(allEvents);
       // Suppress live events during paginated replay to prevent out-of-order
       // delivery. The client's `event_replay` reset rule (firstSeq <= maxSeq)
       // misfires if a live `event` arrives between batches and bumps maxSeq
@@ -213,18 +289,8 @@ export function handleSubscribe(
       // only the last batch. Suppression+catch-up via clearReplaying preserves
       // ordering for both cold (lastSeq=0) and warm (lastSeq>0) subscribes.
       // See change: fix-cold-subscribe-replay-interleave.
-      if (events.length > 0) {
-        markReplaying(ws, msg.sessionId);
-        sendEventBatches(ws, msg.sessionId, events, sendTo).then((lastSent) => {
-          clearReplaying(ws, msg.sessionId, lastSent);
-          replayPendingUiRequests(ws, msg.sessionId);
-          replayUiState(ws, msg.sessionId, ctx);
-        });
-      } else {
-        sendEventBatches(ws, msg.sessionId, events, sendTo).then(() => {
-          replayPendingUiRequests(ws, msg.sessionId);
-          replayUiState(ws, msg.sessionId, ctx);
-        });
+      if (!replayWithPersistedFallback(events, lastSeq === 0)) {
+        replayEvents(events);
       }
     }
   } else if (directoryService) {
@@ -236,7 +302,8 @@ export function handleSubscribe(
         events: [],
         isLast: false,
       });
-      directoryService.loadSessionEvents(msg.sessionId, session.sessionFile, session.contextWindow).then(async (result) => {
+      const closeOpenToolCalls = session.status === "ended";
+      directoryService.loadSessionEvents(msg.sessionId, session.sessionFile, session.contextWindow, MAX_REPLAY_EVENTS, closeOpenToolCalls).then(async (result) => {
         if (result.success) {
           for (const evt of result.events) {
             eventStore.insertEvent(msg.sessionId, evt);
@@ -245,10 +312,7 @@ export function handleSubscribe(
           const metaUpdates: Record<string, unknown> = { dataUnavailable: false, ...statsUpdates };
           sessionManager.update(msg.sessionId, metaUpdates);
           broadcast({ type: "session_updated", sessionId: msg.sessionId, updates: metaUpdates });
-          let stored = eventStore.getEvents(msg.sessionId, 1);
-          if (MAX_REPLAY_EVENTS > 0 && stored.length > MAX_REPLAY_EVENTS) {
-            stored = stored.slice(stored.length - MAX_REPLAY_EVENTS);
-          }
+          const stored = limitReplayEvents(eventStore.getEvents(msg.sessionId, 1));
           const subscribers = getSubscribers(msg.sessionId);
           for (const sub of subscribers) {
             // Asset registry first — see change: chat-markdown-local-images-and-math.

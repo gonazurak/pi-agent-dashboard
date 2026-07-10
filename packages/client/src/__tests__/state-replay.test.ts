@@ -241,6 +241,80 @@ describe("replayEntriesAsEvents", () => {
     expect((endEvent!.event.data as any).toolName).toBe("bash");
   });
 
+  it("can preserve open Agent tool calls for active session replay", () => {
+    const entries = [
+      {
+        type: "message",
+        id: "e1",
+        parentId: null,
+        timestamp: "2025-01-01T00:00:00Z",
+        message: {
+          role: "assistant",
+          content: [
+            {
+              type: "toolCall",
+              id: "tc-agent-active",
+              name: "Agent",
+              arguments: {
+                subagent_type: "smartbox-fullstack-dev",
+                description: "Fix review findings",
+                prompt: "go",
+              },
+            },
+          ],
+        },
+      },
+    ];
+
+    const events = replayEntriesAsEvents("sess-1", entries, { closeOpenToolCalls: false });
+    expect(events.map((e) => e.event.eventType)).not.toContain("tool_execution_end");
+
+    const state = events.reduce(
+      (s, msg) => reduceEvent(s, msg.event),
+      createInitialState(),
+    );
+
+    const agentMsg = state.messages.find((m) => m.toolCallId === "tc-agent-active");
+    expect(agentMsg).toBeDefined();
+    expect(agentMsg!.toolStatus).toBe("running");
+    expect(agentMsg!.toolDetails?.status).toBe("running");
+    expect(state.subagents.get("tc-agent-active")?.status).toBe("running");
+  });
+
+  it("closes stale open Agent tool calls when the conversation has advanced", () => {
+    const entries = [
+      {
+        type: "message",
+        id: "e1",
+        parentId: null,
+        timestamp: "2025-01-01T00:00:00Z",
+        message: {
+          role: "assistant",
+          content: [
+            {
+              type: "toolCall",
+              id: "tc-agent-stale",
+              name: "Agent",
+              arguments: { subagent_type: "worker", description: "old run" },
+            },
+          ],
+        },
+      },
+      {
+        type: "message",
+        id: "e2",
+        parentId: "e1",
+        timestamp: "2025-01-01T00:01:00Z",
+        message: { role: "user", content: [{ type: "text", text: "new turn" }] },
+      },
+    ];
+
+    const events = replayEntriesAsEvents("sess-1", entries, { closeOpenToolCalls: false });
+    const endEvent = events.find((e) => e.event.eventType === "tool_execution_end");
+    expect(endEvent).toBeDefined();
+    expect((endEvent!.event.data as any).toolCallId).toBe("tc-agent-stale");
+  });
+
   it("should handle a full conversation sequence", () => {
     const entries = [
       {
@@ -540,5 +614,138 @@ describe("replayEntriesAsEvents", () => {
     expect(agentMsg!.toolDetails!.displayName).toBe("Explore");
     expect(agentMsg!.toolDetails!.durationMs).toBe(6000);
     expect(agentMsg!.toolDetails!.toolUses).toBe(3);
+  });
+
+  it("should backfill Agent subagent state when replayed toolResult has no toolName/details", () => {
+    const entries = [
+      {
+        type: "message",
+        id: "e1",
+        parentId: null,
+        timestamp: "2025-01-01T00:00:00Z",
+        message: {
+          role: "assistant",
+          content: [
+            {
+              type: "toolCall",
+              id: "tc-agent-fallback",
+              name: "Agent",
+              input: {
+                subagent_type: "smartbox-qa-runtime",
+                description: "Fix missing Clerk vendor chunk",
+                prompt: "Recover the dev server",
+              },
+            },
+          ],
+        },
+      },
+      {
+        type: "message",
+        id: "e2",
+        parentId: "e1",
+        timestamp: "2025-01-01T00:00:06Z",
+        message: {
+          role: "toolResult",
+          toolCallId: "tc-agent-fallback",
+          content: [{ type: "text", text: "Recovered frontend runtime" }],
+          isError: false,
+        },
+      },
+    ];
+
+    const events = replayEntriesAsEvents("sess-1", entries);
+    const state = events.reduce(
+      (s, msg) => reduceEvent(s, msg.event),
+      createInitialState(),
+    );
+
+    const agentMsg = state.messages.find((m) => m.toolCallId === "tc-agent-fallback");
+    expect(agentMsg).toBeDefined();
+    expect(agentMsg!.toolName).toBe("Agent");
+    expect(agentMsg!.args?.subagent_type).toBe("smartbox-qa-runtime");
+    expect(agentMsg!.toolDetails?.agentId).toBe("tc-agent-fallback");
+    expect(agentMsg!.toolDetails?.displayName).toBe("smartbox-qa-runtime");
+
+    const subagent = state.subagents.get("tc-agent-fallback");
+    expect(subagent).toBeDefined();
+    expect(subagent!.status).toBe("completed");
+    expect(subagent!.displayName).toBe("smartbox-qa-runtime");
+    expect(subagent!.description).toBe("Fix missing Clerk vendor chunk");
+    expect(subagent!.result).toBe("Recovered frontend runtime");
+  });
+
+  it("should create a running subagent state when an Agent tool starts", () => {
+    const state = reduceEvent(createInitialState(), {
+      sessionId: "sess-1",
+      eventType: "tool_execution_start",
+      timestamp: 1000,
+      data: {
+        toolCallId: "tc-agent-running",
+        toolName: "Agent",
+        args: {
+          subagent_type: "smartbox-qa-runtime",
+          description: "Fix missing Clerk vendor chunk",
+          prompt: "Recover the dev server",
+        },
+      },
+    } as any);
+
+    const agentMsg = state.messages.find((m) => m.toolCallId === "tc-agent-running");
+    expect(agentMsg).toBeDefined();
+    expect(agentMsg!.toolDetails?.agentId).toBe("tc-agent-running");
+    expect(agentMsg!.toolDetails?.status).toBe("running");
+
+    const subagent = state.subagents.get("tc-agent-running");
+    expect(subagent).toBeDefined();
+    expect(subagent!.status).toBe("running");
+    expect(subagent!.displayName).toBe("smartbox-qa-runtime");
+    expect(subagent!.description).toBe("Fix missing Clerk vendor chunk");
+  });
+
+  it("should sync Agent partial details into the subagent inspector state", () => {
+    const started = reduceEvent(createInitialState(), {
+      sessionId: "sess-1",
+      eventType: "tool_execution_start",
+      timestamp: 1000,
+      data: {
+        toolCallId: "tc-agent-running",
+        toolName: "Agent",
+        args: {
+          subagent_type: "smartbox-qa-runtime",
+          description: "Fix missing Clerk vendor chunk",
+        },
+      },
+    } as any);
+
+    const state = reduceEvent(started, {
+      sessionId: "sess-1",
+      eventType: "tool_execution_update",
+      timestamp: 2000,
+      data: {
+        toolCallId: "tc-agent-running",
+        partialResult: {
+          content: [{ type: "text", text: "Working on Clerk chunk recovery" }],
+          details: {
+            agentId: "agent-real-id",
+            displayName: "smartbox-qa-runtime",
+            subagentType: "smartbox-qa-runtime",
+            description: "Fix missing Clerk vendor chunk",
+            status: "running",
+            toolUses: 6,
+          },
+        },
+      },
+    } as any);
+
+    const agentMsg = state.messages.find((m) => m.toolCallId === "tc-agent-running");
+    expect(agentMsg).toBeDefined();
+    expect(agentMsg!.toolDetails?.agentId).toBe("agent-real-id");
+
+    const subagent = state.subagents.get("agent-real-id");
+    expect(subagent).toBeDefined();
+    expect(subagent!.status).toBe("running");
+    expect(subagent!.displayName).toBe("smartbox-qa-runtime");
+    expect(subagent!.toolUses).toBe(6);
+    expect(state.subagents.has("tc-agent-running")).toBe(false);
   });
 });

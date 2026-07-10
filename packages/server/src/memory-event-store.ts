@@ -37,8 +37,33 @@ export const DEFAULT_MAX_EVENTS_PER_SESSION = 5000;
 
 /** Default max size for any string field within event data */
 const DEFAULT_MAX_STRING_SIZE = 4_000;
-/** Max total serialized size for an individual event's data */
-const MAX_EVENT_DATA_SIZE = 20_000;
+/** Max base64 payload retained for image event data before replacing it with metadata. */
+const MAX_IMAGE_DATA_SIZE = 256_000;
+/** Max timeline entries retained for streamed Agent details in replay cache. */
+const MAX_AGENT_DETAIL_ENTRIES = 80;
+
+function isAgentDetailsRecord(obj: Record<string, unknown>): boolean {
+  return (
+    typeof obj.agentId === "string" &&
+    (typeof obj.status === "string" ||
+      typeof obj.subagentType === "string" ||
+      typeof obj.displayName === "string")
+  );
+}
+
+function truncateAgentEntries(entries: unknown[], maxSize: number, depth: number): unknown[] {
+  const retained =
+    entries.length > MAX_AGENT_DETAIL_ENTRIES
+      ? entries.slice(entries.length - MAX_AGENT_DETAIL_ENTRIES)
+      : entries;
+  let changed = retained.length !== entries.length;
+  const result = retained.map((item) => {
+    const t = truncateStrings(item, maxSize, depth);
+    if (t !== item) changed = true;
+    return t;
+  });
+  return changed ? result : entries;
+}
 
 /**
  * Recursively truncate large string fields in an object.
@@ -64,9 +89,26 @@ function truncateStrings(obj: unknown, maxSize: number, depth = 0): unknown {
     let changed = false;
     const result: Record<string, unknown> = {};
     for (const [key, val] of Object.entries(obj)) {
-      // Preserve base64 image data — skip truncation when sibling mimeType exists
+      // Agent timelines drive the subagent detail drawer/popout. Preserve the
+      // array shape so the client reducer can keep rendering details, while
+      // bounding retained history to avoid unbounded replay-cache growth.
+      if (key === "entries" && Array.isArray(val) && isAgentDetailsRecord(obj)) {
+        const t = truncateAgentEntries(val, maxSize, depth + 1);
+        if (t !== val) changed = true;
+        result[key] = t;
+        continue;
+      }
+      // Preserve small image payloads, but do not let screenshots/base64 blobs
+      // dominate the in-memory event store or browser replay payload.
       if (key === "data" && typeof val === "string" && "mimeType" in obj) {
-        result[key] = val;
+        if (val.length > MAX_IMAGE_DATA_SIZE) {
+          result[key] = "[image data truncated]";
+          result.truncated = true;
+          result.originalDataLength = val.length;
+          changed = true;
+        } else {
+          result[key] = val;
+        }
         continue;
       }
       // Skip 'thinking' blocks entirely — large and not shown in chat

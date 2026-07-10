@@ -225,6 +225,15 @@ export const DEFAULT_MODEL_PROXY: ModelProxyConfig = {
   apiKeys: [],
 };
 
+export interface CodexFastConfig {
+  /** Enables the pi-codex-fast extension for eligible openai-codex models. */
+  enabled: boolean;
+}
+
+export const DEFAULT_CODEX_FAST: CodexFastConfig = {
+  enabled: false,
+};
+
 /**
  * Plugin-specific config namespace.
  * Lives at ~/.pi/dashboard/config.json#plugins.<id>.*
@@ -336,6 +345,8 @@ export interface DashboardConfig {
   plugins: PluginsConfig;
   /** Model proxy configuration (OpenAI/Anthropic-compatible /v1/* endpoints). */
   modelProxy: ModelProxyConfig;
+  /** Codex priority tier extension config for newly spawned openai-codex sessions. */
+  codexFast: CodexFastConfig;
 }
 
 export interface CorsConfig {
@@ -358,6 +369,7 @@ export function clampSpawnRegisterTimeoutMs(v: unknown): number {
 const DEFAULTS: DashboardConfig = {
   plugins: {},
   modelProxy: { ...DEFAULT_MODEL_PROXY },
+  codexFast: { ...DEFAULT_CODEX_FAST },
   port: 8000,
   piPort: 9999,
   autoStart: true,
@@ -616,6 +628,13 @@ export function parseModelProxyConfig(raw: any): ModelProxyConfig {
   };
 }
 
+function parseCodexFastConfig(raw: any): CodexFastConfig {
+  if (!raw || typeof raw !== "object") return { ...DEFAULT_CODEX_FAST };
+  return {
+    enabled: typeof raw.enabled === "boolean" ? raw.enabled : DEFAULT_CODEX_FAST.enabled,
+  };
+}
+
 function parseKnownServers(raw: any): KnownServer[] {
   if (!Array.isArray(raw)) return [];
   return raw
@@ -717,6 +736,7 @@ export function loadConfig(): DashboardConfig {
           ? parsed.windowsGitSource
           : defaults.windowsGitSource,
       modelProxy: parseModelProxyConfig(parsed.modelProxy),
+      codexFast: parseCodexFastConfig(parsed.codexFast),
     };
 
     // Compute resolvedTrustedNetworks: merge trustedNetworks + auth.bypassHosts

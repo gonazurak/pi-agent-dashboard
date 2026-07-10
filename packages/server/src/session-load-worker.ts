@@ -30,6 +30,10 @@ export interface SessionLoadRequest {
   /** Persisted `session.contextWindow`; passed through to replay so
    *  `stats_update` events use the real window, not the model heuristic. */
   knownContextWindow?: number;
+  /** Max replayed events to return to the dashboard (0/undefined = unlimited). */
+  maxEvents?: number;
+  /** See ReplayEntriesOptions.closeOpenToolCalls. */
+  closeOpenToolCalls?: boolean;
 }
 
 export interface LoadedEvent {
@@ -54,10 +58,16 @@ export interface SessionLoadResult {
  * body in `directory-service.ts::loadSessionEvents()`.
  */
 export function loadAndReplay(req: SessionLoadRequest): SessionLoadResult {
-  const { jobId, sessionId, sessionFile, knownContextWindow } = req;
+  const { jobId, sessionId, sessionFile, knownContextWindow, maxEvents, closeOpenToolCalls } = req;
   try {
     const entries = loadSessionEntries(sessionFile);
-    const events = replayEntriesAsEvents(sessionId, entries, knownContextWindow).map((m) => m.event);
+    let events = replayEntriesAsEvents(sessionId, entries, {
+      knownContextWindow,
+      closeOpenToolCalls,
+    }).map((m) => m.event);
+    if (maxEvents !== undefined && maxEvents > 0 && events.length > maxEvents) {
+      events = events.slice(events.length - maxEvents);
+    }
     return { jobId, success: true, events, entryCount: entries.length };
   } catch (err: any) {
     const error = err?.code === "ENOENT" ? "file_not_found" : (err?.message ?? "parse_error");

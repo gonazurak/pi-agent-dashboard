@@ -3,7 +3,7 @@ import { usePopoverFlip } from "../hooks/usePopoverFlip.js";
 import { Icon } from "@mdi/react";
 import { mdiHeadLightbulb } from "@mdi/js";
 
-const THINKING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh"] as const;
+const THINKING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh", "max"] as const;
 
 interface Props {
   current?: string;

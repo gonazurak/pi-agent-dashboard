@@ -3,13 +3,18 @@
  *
  * See change: add-subagent-inspector.
  */
-import { describe, it, expect, afterEach } from "vitest";
-import { render, screen, cleanup } from "@testing-library/react";
+import { describe, it, expect } from "vitest";
+import { renderToStaticMarkup } from "react-dom/server";
 import React from "react";
+import {
+  UiPrimitiveProvider,
+  createUiPrimitiveRegistry,
+  registerUiPrimitive,
+} from "@blackbelt-technology/dashboard-plugin-runtime";
+import { UI_PRIMITIVE_KEYS } from "@blackbelt-technology/pi-dashboard-shared/dashboard-plugin/ui-primitives.js";
 import { SubagentPopoutPage } from "../SubagentPopoutPage.js";
 import type { SessionStateLike } from "../SubagentDetailView.js";
 import type { SubagentState } from "../types.js";
-import { withUiPrimitiveProvider } from "@blackbelt-technology/dashboard-plugin-runtime/test-support";
 
 const MockMarkdown: React.FC<{ content: string }> = ({ content }) => <div data-testid="md">{content}</div>;
 
@@ -29,15 +34,17 @@ function emptySession(): SessionStateLike {
   return { subagents: new Map() };
 }
 
-function renderWithPrimitives(ui: React.ReactElement) {
-  return render(withUiPrimitiveProvider({ "ui:markdown-content": MockMarkdown }, ui));
+function renderWithPrimitives(ui: React.ReactElement): string {
+  const registry = createUiPrimitiveRegistry();
+  registerUiPrimitive(registry, UI_PRIMITIVE_KEYS.markdownContent, MockMarkdown);
+  return renderToStaticMarkup(
+    <UiPrimitiveProvider value={registry}>{ui}</UiPrimitiveProvider>,
+  );
 }
 
 describe("SubagentPopoutPage", () => {
-  afterEach(() => cleanup());
-
   it("shows loading state before subscription resolves", () => {
-    renderWithPrimitives(
+    const html = renderWithPrimitives(
       <SubagentPopoutPage
         sessionId="sess_42"
         agentId="abc123"
@@ -45,11 +52,11 @@ describe("SubagentPopoutPage", () => {
         subscriptionResolved={false}
       />,
     );
-    expect(screen.getByText(/Loading parent session/i)).toBeTruthy();
+    expect(html).toContain("Loading parent session");
   });
 
   it("shows 'parent session not found' when subscription resolves with no session", () => {
-    renderWithPrimitives(
+    const html = renderWithPrimitives(
       <SubagentPopoutPage
         sessionId="sess_42"
         agentId="abc123"
@@ -57,11 +64,11 @@ describe("SubagentPopoutPage", () => {
         subscriptionResolved={true}
       />,
     );
-    expect(screen.getByText(/Parent session not found/i)).toBeTruthy();
+    expect(html).toContain("Parent session not found");
   });
 
   it("shows 'subagent not found' when parent session exists but agent does not", () => {
-    renderWithPrimitives(
+    const html = renderWithPrimitives(
       <SubagentPopoutPage
         sessionId="sess_42"
         agentId="missing"
@@ -69,18 +76,19 @@ describe("SubagentPopoutPage", () => {
         subscriptionResolved={true}
       />,
     );
-    expect(screen.getByText(/Subagent not found/i)).toBeTruthy();
+    expect(html).toContain("Subagent not found");
   });
 
-  it("renders the detail view when subagent is found", () => {
+  it("renders a chat-style popout when subagent is found", () => {
     const session = sessionWithAgent("abc123", {
       displayName: "explorer",
+      description: "Inspect the project",
       status: "running",
       activity: "reading",
       toolUses: 2,
       entries: [{ kind: "text", text: "Looking up files", ts: 1 }],
     });
-    renderWithPrimitives(
+    const html = renderWithPrimitives(
       <SubagentPopoutPage
         sessionId="sess_42"
         agentId="abc123"
@@ -89,9 +97,10 @@ describe("SubagentPopoutPage", () => {
         parentLabel="/home/me/project"
       />,
     );
-    expect(screen.getByText(/\/home\/me\/project/)).toBeTruthy();
-    // Tier 1 entries render via the detail view body
-    expect(screen.getByText(/Looking up files/)).toBeTruthy();
+    expect(html).toContain("/home/me/project");
+    expect(html).toContain("data-testid=\"subagent-chat-view\"");
+    expect(html).toContain("Inspect the project");
+    expect(html).toContain("Looking up files");
   });
 
   it("renders agentMdPath in the chrome header when present", () => {
@@ -101,7 +110,7 @@ describe("SubagentPopoutPage", () => {
       agentMdPath: "/home/u/.pi/agent/agents/CodeReviewer.md",
       result: "LGTM",
     });
-    renderWithPrimitives(
+    const html = renderWithPrimitives(
       <SubagentPopoutPage
         sessionId="sess_42"
         agentId="abc123"
@@ -111,9 +120,6 @@ describe("SubagentPopoutPage", () => {
       />,
     );
     // The path renders as monospace text under the displayName.
-    // It appears in both the chrome header and the SubagentDetailView header,
-    // so we just check at least one occurrence.
-    const matches = screen.getAllByText("/home/u/.pi/agent/agents/CodeReviewer.md");
-    expect(matches.length).toBeGreaterThanOrEqual(1);
+    expect(html).toContain("/home/u/.pi/agent/agents/CodeReviewer.md");
   });
 });

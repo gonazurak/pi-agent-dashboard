@@ -10,6 +10,32 @@ function makeEvent(type: string = "test"): DashboardEvent {
   return { eventType: type, timestamp: Date.now(), data: {} };
 }
 
+function makeUserMessageEvent(text: string): DashboardEvent {
+  return {
+    eventType: "message_start",
+    timestamp: Date.now(),
+    data: { message: { role: "user", content: [{ type: "text", text }] } },
+  };
+}
+
+function makeAgentUpdateEvent(agentId: string): DashboardEvent {
+  return {
+    eventType: "tool_execution_update",
+    timestamp: Date.now(),
+    data: {
+      toolCallId: "tool-agent-1",
+      toolName: "Agent",
+      partialResult: {
+        details: {
+          agentId,
+          status: "running",
+          entries: [{ kind: "thinking", text: "working", ts: Date.now() }],
+        },
+      },
+    },
+  };
+}
+
 function createMockContext(overrides: Partial<BrowserHandlerContext> = {}): BrowserHandlerContext {
   return {
     ws: { readyState: 1, OPEN: 1, bufferedAmount: 0 } as any,
@@ -196,7 +222,36 @@ describe("handleSubscribe — stale lastSeq detection", () => {
     await new Promise((r) => setTimeout(r, 20));
 
     expect(loadSessionEvents).toHaveBeenCalledTimes(1);
-    expect(loadSessionEvents).toHaveBeenCalledWith("s-ctx", "/sessions/s-ctx.jsonl", 1_000_000);
+    expect(loadSessionEvents).toHaveBeenCalledWith("s-ctx", "/sessions/s-ctx.jsonl", 1_000_000, 1000, true);
+  });
+
+  it("preserves open tool calls when lazy-loading an active session", async () => {
+    const loadSessionEvents = vi.fn(async () => ({ success: true, events: [] }));
+    const directoryService = { loadSessionEvents } as any;
+    const ctx = createMockContext({ directoryService });
+
+    ctx.sessionManager.restore({
+      id: "s-active",
+      cwd: "/test",
+      source: "dashboard",
+      status: "active",
+      startedAt: 1000,
+      tokensIn: 0,
+      tokensOut: 0,
+      cost: 0,
+      contextWindow: 272_000,
+      sessionFile: "/sessions/s-active.jsonl",
+      sessionDir: "/sessions",
+      hidden: false,
+    } as any);
+
+    const subs = new Set<string>();
+    handleSubscribe({ type: "subscribe", sessionId: "s-active" }, subs, ctx);
+
+    await new Promise((r) => setTimeout(r, 20));
+
+    expect(loadSessionEvents).toHaveBeenCalledTimes(1);
+    expect(loadSessionEvents).toHaveBeenCalledWith("s-active", "/sessions/s-active.jsonl", 272_000, 1000, false);
   });
 
   it("does full replay when lastSeq is 0", async () => {
@@ -215,6 +270,56 @@ describe("handleSubscribe — stale lastSeq detection", () => {
     const replays = calls.filter(([, msg]) => msg.type === "event_replay");
     const allEvents = replays.flatMap(([, msg]: any) => msg.events);
     expect(allEvents).toHaveLength(3);
+  });
+
+  it("falls back to persisted replay and then preserves live Agent updates when cold cache has no chat anchors", async () => {
+    const markReplaying = vi.fn();
+    const clearReplaying = vi.fn();
+    const loadSessionEvents = vi.fn(async () => ({
+      success: true,
+      events: [makeUserMessageEvent("persisted history")],
+    }));
+    const ctx = createMockContext({
+      clearReplaying,
+      directoryService: { loadSessionEvents } as any,
+      markReplaying,
+    });
+    ctx.sessionManager.restore({
+      id: "s-capped",
+      cwd: "/test",
+      source: "dashboard",
+      status: "active",
+      startedAt: 1000,
+      tokensIn: 0,
+      tokensOut: 0,
+      cost: 0,
+      contextWindow: 272_000,
+      sessionFile: "/sessions/s-capped.jsonl",
+      sessionDir: "/sessions",
+      hidden: false,
+    } as any);
+
+    ctx.eventStore.insertEvent("s-capped", makeAgentUpdateEvent("agent-live-1"));
+
+    const subs = new Set<string>();
+    handleSubscribe({ type: "subscribe", sessionId: "s-capped", lastSeq: 0 }, subs, ctx);
+
+    await new Promise((r) => setTimeout(r, 50));
+
+    expect(loadSessionEvents).toHaveBeenCalledWith("s-capped", "/sessions/s-capped.jsonl", 272_000, 1000, false);
+    const calls = (ctx.sendTo as any).mock.calls as Array<[any, ServerToBrowserMessage]>;
+    const replayedTypes = calls
+      .filter(([, msg]) => msg.type === "event_replay")
+      .flatMap(([, msg]: any) => msg.events)
+      .map((entry: any) => entry.event.eventType);
+    expect(replayedTypes).toEqual(["message_start"]);
+    const continuationEvents = calls
+      .filter(([, msg]) => msg.type === "event")
+      .map(([, msg]: any) => msg.event);
+    expect(continuationEvents.map((event: DashboardEvent) => event.eventType)).toEqual(["tool_execution_update"]);
+    expect((continuationEvents[0].data as any).partialResult.details.agentId).toBe("agent-live-1");
+    expect(clearReplaying).toHaveBeenCalledWith(ctx.ws, "s-capped", 1);
+    expect(markReplaying).toHaveBeenCalledWith(ctx.ws, "s-capped");
   });
 });
 

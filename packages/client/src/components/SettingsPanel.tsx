@@ -117,6 +117,8 @@ interface Config {
   };
   /** Dashboard model proxy config. See change: add-dashboard-model-proxy. */
   modelProxy?: Record<string, any>;
+  /** Enables the pi-codex-fast priority tier extension for eligible openai-codex models. */
+  codexFast?: { enabled?: boolean };
   /** UI preference: show worktree spawn buttons in folder + OpenSpec rows. Default true. See change: openspec-worktree-spawn-button. */
   gitWorktreeEnabled?: boolean;
   /** Windows-only git/bash source. See change: embed-git-bash-on-windows. */
@@ -152,7 +154,7 @@ const CONFIG_FIELD_PAGE: Record<string, string> = {
   gitWorktreeEnabled: "sessions", dashboardName: "sessions", defaultModel: "sessions",
   windowsGitSource: "sessions", autoStart: "sessions",
   trustedNetworks: "security", auth: "security",
-  modelProxy: "providers",
+  modelProxy: "providers", codexFast: "providers",
   openspec: "openspec",
   devBuildOnReload: "developer", keeperLog: "developer", editor: "developer",
 };
@@ -228,6 +230,9 @@ function computeConfigPartial(config: Config, original: Config): Record<string, 
   }
   if (JSON.stringify(config.modelProxy) !== JSON.stringify(original.modelProxy)) {
     partial.modelProxy = config.modelProxy;
+  }
+  if (JSON.stringify(config.codexFast ?? { enabled: false }) !== JSON.stringify(original.codexFast ?? { enabled: false })) {
+    partial.codexFast = config.codexFast ?? { enabled: false };
   }
   return partial;
 }
@@ -1124,6 +1129,16 @@ export function SettingsPanel({ availableModels, onMessage, onBack }: {
                     onChange={(patch) => update((c) => { c.modelProxy = { ...c.modelProxy, ...patch }; })}
                     upstreamExtensionDetected={upstreamPiModelProxyInstalled}
                   />
+                </Section>
+                <Section title={i18nT("auto.codex_fast", undefined, "Codex Fast")}>
+                  <ToggleField
+                    label={i18nT("auto.enable_codex_fast_mode", undefined, "Enable Codex Fast Mode")}
+                    value={config.codexFast?.enabled ?? false}
+                    onChange={(v) => update((c) => { c.codexFast = { ...c.codexFast, enabled: v }; })}
+                  />
+                  <p className="mt-1 text-xs text-[var(--text-tertiary)]">
+                    {i18nT("auto.codex_fast_sends_priority_tier", undefined, "New openai-codex gpt-5.4 and gpt-5.5 sessions use the pi-codex-fast extension to request OpenAI priority service tier. Active sessions keep their current plugin state.")}
+                  </p>
                 </Section>
                 <SettingsSectionSlot tab="providers" />
               </>

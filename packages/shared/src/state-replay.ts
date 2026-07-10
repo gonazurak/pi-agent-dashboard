@@ -32,13 +32,29 @@ import type { EventForwardMessage } from "./protocol.js";
  *   pins Claude to 200k, so passing the persisted value avoids a brief
  *   200k flicker on reload before the next live `turn_end` arrives.
  */
+export interface ReplayEntriesOptions {
+  knownContextWindow?: number;
+  /**
+   * When replaying an ended session, close tool calls that never persisted a
+   * result so old killed processes do not look active forever. Active sessions
+   * must leave those starts open so refresh can still show in-flight agents.
+   */
+  closeOpenToolCalls?: boolean;
+}
+
 export function replayEntriesAsEvents(
   sessionId: string,
   entries: any[],
-  knownContextWindow?: number,
+  knownContextWindowOrOptions?: number | ReplayEntriesOptions,
 ): EventForwardMessage[] {
+  const options =
+    typeof knownContextWindowOrOptions === "object"
+      ? knownContextWindowOrOptions
+      : { knownContextWindow: knownContextWindowOrOptions };
+  const knownContextWindow = options.knownContextWindow;
+  const closeOpenToolCalls = options.closeOpenToolCalls ?? true;
   const messages: EventForwardMessage[] = [];
-  const openToolCalls = new Set<string>(); // track tool calls without results
+  const openToolCalls = new Map<string, { toolName: string; args: Record<string, unknown>; stale?: boolean }>(); // track tool calls without results
   // Persisted flow-run events (change: replay-persisted-flow-runs). Collected
   // during the loop, then emitted sorted by seq so the client's idempotent
   // reduceFlowEvent rebuilds the flow card identically to the live path.
@@ -72,6 +88,10 @@ export function replayEntriesAsEvents(
     if (entry.type === "message" && entry.message) {
       const msg = entry.message;
 
+      if ((msg.role === "user" || msg.role === "assistant") && openToolCalls.size > 0) {
+        for (const open of openToolCalls.values()) open.stale = true;
+      }
+
       if (msg.role === "user") {
         messages.push(makeEvent(sessionId, "message_start", ts, { message: msg, entryId: entry.id }));
       }
@@ -81,14 +101,16 @@ export function replayEntriesAsEvents(
         // Emit tool_execution_start for each tool call
         for (const part of content) {
           if (part.type === "toolCall") {
+            const rawArgs = part.arguments ?? part.input;
+            const args = typeof rawArgs === "string"
+              ? tryParseJson(rawArgs)
+              : isRecord(rawArgs) ? rawArgs : {};
             messages.push(makeEvent(sessionId, "tool_execution_start", ts, {
               toolCallId: part.id,
               toolName: part.name,
-              args: typeof part.arguments === "string"
-                ? tryParseJson(part.arguments)
-                : part.arguments,
+              args,
             }));
-            openToolCalls.add(part.id);
+            openToolCalls.set(part.id, { toolName: part.name, args });
           }
         }
         // Emit message_update (sets streamingText) then message_end (finalizes)
@@ -125,6 +147,10 @@ export function replayEntriesAsEvents(
       // Tool results: toolCallId and toolName are at the message level
       // Structure: { role: "toolResult", toolCallId, toolName, content: [{type:"text",text:"..."}], isError }
       if (msg.role === "toolResult" && msg.toolCallId) {
+        const startedTool = openToolCalls.get(msg.toolCallId);
+        const toolName = typeof msg.toolName === "string"
+          ? msg.toolName
+          : startedTool?.toolName ?? "unknown";
         const resultText = Array.isArray(msg.content)
           ? msg.content
               .filter((c: any) => c.type === "text")
@@ -137,7 +163,7 @@ export function replayEntriesAsEvents(
           : [];
         const eventData: Record<string, unknown> = {
           toolCallId: msg.toolCallId,
-          toolName: msg.toolName ?? "unknown",
+          toolName,
           result: resultText,
           isError: msg.isError ?? false,
         };
@@ -147,6 +173,12 @@ export function replayEntriesAsEvents(
         // Include tool details (e.g. AgentDetails from pi-subagents) if present
         if (msg.details && typeof msg.details === "object") {
           eventData.details = msg.details;
+        } else if (toolName === "Agent") {
+          eventData.details = synthesizeAgentDetails(
+            msg.toolCallId,
+            startedTool?.args,
+            msg.isError === true,
+          );
         }
         messages.push(makeEvent(sessionId, "tool_execution_end", ts, eventData));
         openToolCalls.delete(msg.toolCallId);
@@ -161,18 +193,21 @@ export function replayEntriesAsEvents(
     }
   }
 
-  // Close any orphaned tool calls (agent killed mid-execution)
-  for (const toolCallId of openToolCalls) {
-    const startEvent = messages.find(
-      (m) => m.event.eventType === "tool_execution_start" && (m.event.data as any).toolCallId === toolCallId,
-    );
-    const ts = startEvent ? startEvent.event.timestamp : Date.now();
-    messages.push(makeEvent(sessionId, "tool_execution_end", ts, {
-      toolCallId,
-      toolName: (startEvent?.event.data as any)?.toolName ?? "unknown",
-      result: "",
-      isError: false,
-    }));
+  if (closeOpenToolCalls || Array.from(openToolCalls.values()).some((startedTool) => startedTool.stale)) {
+    // Close any orphaned tool calls (agent killed mid-execution)
+    for (const [toolCallId, startedTool] of openToolCalls) {
+      if (!closeOpenToolCalls && !startedTool.stale) continue;
+      const startEvent = messages.find(
+        (m) => m.event.eventType === "tool_execution_start" && (m.event.data as any).toolCallId === toolCallId,
+      );
+      const ts = startEvent ? startEvent.event.timestamp : Date.now();
+      messages.push(makeEvent(sessionId, "tool_execution_end", ts, {
+        toolCallId,
+        toolName: (startEvent?.event.data as any)?.toolName ?? startedTool.toolName ?? "unknown",
+        result: "",
+        isError: false,
+      }));
+    }
   }
 
   // Emit persisted flow-run events sorted by seq (defensive: file order already
@@ -185,6 +220,25 @@ export function replayEntriesAsEvents(
   }
 
   return messages;
+}
+
+function isRecord(v: unknown): v is Record<string, unknown> {
+  return !!v && typeof v === "object" && !Array.isArray(v);
+}
+
+function synthesizeAgentDetails(
+  toolCallId: string,
+  args: Record<string, unknown> | undefined,
+  isError: boolean,
+): Record<string, unknown> {
+  const subagentType = typeof args?.subagent_type === "string" ? args.subagent_type : undefined;
+  const description = typeof args?.description === "string" ? args.description : undefined;
+  return {
+    agentId: toolCallId,
+    status: isError ? "error" : "completed",
+    ...(subagentType ? { displayName: subagentType, subagentType } : {}),
+    ...(description ? { description } : {}),
+  };
 }
 
 function makeEvent(

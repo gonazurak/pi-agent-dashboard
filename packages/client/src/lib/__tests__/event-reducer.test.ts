@@ -1922,6 +1922,7 @@ describe("command_feedback events", () => {
 
       const sub = state.subagents.get("sub_abc");
       expect(sub).toBeDefined();
+      expect(state.subagents.has("tc1")).toBe(false);
       expect(sub!.status).toBe("completed");
       expect(sub!.result).toBe("Done.");
       expect(sub!.entries).toEqual([{ kind: "text", text: "hi", ts: 1 }]);
@@ -2014,7 +2015,7 @@ describe("command_feedback events", () => {
       expect(state.subagents.size).toBe(before.subagents.size); // unchanged
     });
 
-    it("backfill is a no-op when details.agentId is missing", () => {
+    it("backfill keeps the start placeholder when details.agentId is missing", () => {
       const state = applyEvents([
         {
           eventType: "tool_execution_start",
@@ -2033,7 +2034,8 @@ describe("command_feedback events", () => {
           },
         },
       ]);
-      expect(state.subagents.size).toBe(0);
+      expect(state.subagents.size).toBe(1);
+      expect(state.subagents.has("tc1")).toBe(true);
     });
 
     it("existing toolDetails write path remains intact (regression guard)", () => {

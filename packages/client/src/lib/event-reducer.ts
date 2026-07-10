@@ -230,6 +230,38 @@ function readSubagentDetails(
   return out;
 }
 
+function agentStatusToSubagentStatus(status: unknown): SubagentState["status"] {
+  switch (status) {
+    case "completed":
+    case "steered":
+      return "completed";
+    case "error":
+    case "aborted":
+    case "stopped":
+      return "failed";
+    case "queued":
+    case "running":
+    default:
+      return "running";
+  }
+}
+
+function buildAgentStartDetails(
+  toolCallId: string,
+  args: Record<string, unknown> | undefined,
+): Record<string, unknown> {
+  const subagentType =
+    typeof args?.subagent_type === "string" ? args.subagent_type : undefined;
+  const description =
+    typeof args?.description === "string" ? args.description : undefined;
+  return {
+    agentId: toolCallId,
+    status: "running",
+    ...(subagentType ? { displayName: subagentType, subagentType } : {}),
+    ...(description ? { description } : {}),
+  };
+}
+
 export function createInitialState(): SessionState {
   return {
     messages: [],
@@ -1171,6 +1203,34 @@ export function reduceEvent(state: SessionState, event: DashboardEvent): Session
       });
       next.currentTool = toolName;
 
+      const startToolDetails =
+        toolName === "Agent" ? buildAgentStartDetails(toolCallId, args) : undefined;
+      if (startToolDetails) {
+        const subagentType =
+          typeof startToolDetails.subagentType === "string"
+            ? (startToolDetails.subagentType as string)
+            : "unknown";
+        const description =
+          typeof startToolDetails.description === "string"
+            ? (startToolDetails.description as string)
+            : "";
+        next.subagents = new Map(next.subagents);
+        const existingSub = next.subagents.get(toolCallId);
+        const keepTerminal =
+          existingSub?.status === "completed" || existingSub?.status === "failed";
+        next.subagents.set(toolCallId, {
+          id: toolCallId,
+          type: existingSub?.type ?? subagentType,
+          description: existingSub?.description ?? description,
+          ...existingSub,
+          status: keepTerminal ? existingSub.status : "running",
+          startedAt:
+            existingSub?.startedAt ??
+            (typeof event.timestamp === "number" ? event.timestamp : Date.now()),
+          ...readSubagentDetails(startToolDetails),
+        });
+      }
+
       // Track file-modifying tools
       const toolLower = toolName.toLowerCase();
       if (toolLower === "write" || toolLower === "edit") {
@@ -1194,6 +1254,9 @@ export function reduceEvent(state: SessionState, event: DashboardEvent): Session
           ...next.messages[existingToolIdx],
           toolName,
           args,
+          ...(startToolDetails && !next.messages[existingToolIdx].toolDetails
+            ? { toolDetails: startToolDetails }
+            : {}),
           // Keep startedAt/timestamp from the original row — the existing
           // values are already correct for terminal rows, and refreshing them
           // would invalidate `duration` derived from startedAt at end-time.
@@ -1214,6 +1277,7 @@ export function reduceEvent(state: SessionState, event: DashboardEvent): Session
           toolStatus: "running",
           timestamp: event.timestamp,
           startedAt: event.timestamp,
+          ...(startToolDetails ? { toolDetails: startToolDetails } : {}),
         },
       ];
       break;
@@ -1243,6 +1307,46 @@ export function reduceEvent(state: SessionState, event: DashboardEvent): Session
               ...(text != null ? { result: truncateLines(text, 30) } : {}),
               ...(details ? { toolDetails: details } : {}),
             };
+            if (details) {
+              const toolMsg = next.messages[idx];
+              const currentToolName =
+                next.toolCalls.get(toolCallId)?.toolName ?? toolMsg.toolName;
+              const agentId =
+                typeof details.agentId === "string" ? details.agentId : undefined;
+              if (currentToolName === "Agent" && agentId) {
+                const subagentType =
+                  typeof details.subagentType === "string"
+                    ? details.subagentType
+                    : typeof toolMsg.args?.subagent_type === "string"
+                      ? (toolMsg.args.subagent_type as string)
+                      : "unknown";
+                const description =
+                  typeof details.description === "string"
+                    ? details.description
+                    : typeof toolMsg.args?.description === "string"
+                      ? (toolMsg.args.description as string)
+                      : "";
+                next.subagents = new Map(next.subagents);
+                const existingSub = next.subagents.get(agentId);
+                const placeholderSub = agentId !== toolCallId ? next.subagents.get(toolCallId) : undefined;
+                next.subagents.set(agentId, {
+                  ...placeholderSub,
+                  ...existingSub,
+                  id: agentId,
+                  type: existingSub?.type ?? placeholderSub?.type ?? subagentType,
+                  description: existingSub?.description ?? placeholderSub?.description ?? description,
+                  status: agentStatusToSubagentStatus(details.status),
+                  startedAt:
+                    existingSub?.startedAt ??
+                    placeholderSub?.startedAt ??
+                    (typeof event.timestamp === "number" ? event.timestamp : Date.now()),
+                  ...readSubagentDetails(details),
+                });
+                if (placeholderSub) {
+                  next.subagents.delete(toolCallId);
+                }
+              }
+            }
           } else {
             // Plain string partialResult (standard tools)
             next.messages[idx] = {
@@ -1348,26 +1452,33 @@ export function reduceEvent(state: SessionState, event: DashboardEvent): Session
 
           next.subagents = new Map(next.subagents);
           const existingSub = next.subagents.get(agentId);
+          const placeholderSub = agentId !== toolCallId ? next.subagents.get(toolCallId) : undefined;
           // mergeNonUndefined semantics: preserve prior non-undefined fields
           // rather than overwrite with undefined. This makes live + replay
           // paths commutative regardless of arrival order.
           const merged: SubagentState = {
+            ...placeholderSub,
+            ...existingSub,
             id: agentId,
             type:
               existingSub?.type ??
+              placeholderSub?.type ??
               (typeof endDetails?.subagentType === "string"
                 ? (endDetails.subagentType as string)
                 : "unknown"),
             description:
               existingSub?.description ??
+              placeholderSub?.description ??
               (typeof endDetails?.description === "string"
                 ? (endDetails.description as string)
                 : ""),
-            ...existingSub,
             ...Object.fromEntries(
               Object.entries(patch).filter(([, v]) => v !== undefined),
             ),
           } as SubagentState;
+          if (placeholderSub) {
+            next.subagents.delete(toolCallId);
+          }
           next.subagents.set(agentId, merged);
         }
       }

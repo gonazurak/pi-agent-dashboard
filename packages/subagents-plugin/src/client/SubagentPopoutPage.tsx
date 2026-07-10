@@ -1,7 +1,7 @@
 /**
  * SubagentPopoutPage — fullscreen route content for /session/:sid/subagent/:aid.
  *
- * Renders the SubagentDetailView in `popout` mode plus a chrome header.
+ * Renders a chat-style subagent transcript plus a chrome header.
  * Shows graceful empty states for:
  *   - subscription not yet resolved (loading)
  *   - parent session not found in client state
@@ -12,7 +12,8 @@
 import React, { useEffect } from "react";
 import { Icon } from "@mdi/react";
 import { mdiArrowLeft, mdiClose } from "@mdi/js";
-import { SubagentDetailView, type SessionStateLike } from "./SubagentDetailView.js";
+import type { SessionStateLike } from "./SubagentDetailView.js";
+import { SubagentChatView } from "./SubagentChatView.js";
 
 export interface SubagentPopoutPageProps {
   sessionId: string;
@@ -103,7 +104,9 @@ export function SubagentPopoutPage({
     );
   }
 
-  // Found: render the detail view in popout mode with a chrome header.
+  // Found: render a chat-style transcript with a chrome header. The inline
+  // inspector still uses SubagentDetailView; the popout should feel like a
+  // regular session, not a stretched details panel.
   return (
     <div className="flex flex-col h-full overflow-hidden">
       <div className="px-3 py-2 border-b border-[var(--border-primary)] bg-[var(--bg-primary)] flex items-center gap-2 flex-shrink-0">
@@ -136,7 +139,7 @@ export function SubagentPopoutPage({
       {/* `min-h-0` is required so the body scrolls instead of overflowing.
           See change: fix-flows-plugin-polish (scrollbar fix). */}
       <div className="flex-1 min-h-0 overflow-hidden">
-        <SubagentDetailView session={session} agentId={agentId} mode="popout" sessionId={forwardSessionId ?? sessionId} />
+        <SubagentChatView subagent={sub} sessionId={forwardSessionId ?? sessionId} />
       </div>
     </div>
   );

@@ -212,6 +212,40 @@ describe("memory-event-store", () => {
     });
   });
 
+  describe("Agent details preservation", () => {
+    it("keeps Agent detail entries as a bounded array instead of replacing them with a string", () => {
+      const store = createMemoryEventStore(neverPinned, 100, 5000, 100);
+      const event: DashboardEvent = {
+        eventType: "tool_execution_update",
+        timestamp: Date.now(),
+        data: {
+          toolCallId: "tool-agent-1",
+          toolName: "Agent",
+          partialResult: {
+            details: {
+              agentId: "agent-1",
+              status: "running",
+              displayName: "worker",
+              entries: Array.from({ length: 100 }, (_, i) => ({
+                kind: "tool",
+                text: `step-${i}`,
+                ts: i,
+              })),
+            },
+          },
+        },
+      };
+
+      store.insertEvent("s1", event);
+      const stored = store.getEvent("s1", 1);
+      const entries = (stored as any).data.partialResult.details.entries;
+      expect(Array.isArray(entries)).toBe(true);
+      expect(entries).toHaveLength(80);
+      expect(entries[0].text).toBe("step-20");
+      expect(entries[79].text).toBe("step-99");
+    });
+  });
+
   describe("getMaxSeq", () => {
     it("returns 0 for unknown session", () => {
       const store = createMemoryEventStore(neverPinned);

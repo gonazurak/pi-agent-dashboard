@@ -15,6 +15,9 @@ interface Props {
 
 export function ThinkingBlock({ content, isStreaming, defaultExpanded = false, startedAt, duration }: Props) {
   const [expanded, setExpanded] = useState(defaultExpanded);
+  const hasContent = content.trim().length > 0;
+
+  if (!hasContent) return null;
 
   return (
     <div className="mx-4 border-l-2 border-purple-500/30 pl-3">

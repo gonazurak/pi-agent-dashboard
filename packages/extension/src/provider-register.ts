@@ -630,9 +630,9 @@ export async function reloadProviders(
 // Probe shape (matches @blackbelt-technology/pi-dashboard-subagents):
 //   { ref, resolved?, model?, thinkingLevel?, auth?, error?, available? }
 
-type ThinkingLevel = "minimal" | "low" | "medium" | "high" | "xhigh" | "off";
+type ThinkingLevel = "minimal" | "low" | "medium" | "high" | "xhigh" | "max" | "off";
 const MODEL_RESOLVE_THINKING_LEVELS: readonly ThinkingLevel[] = [
-  "minimal", "low", "medium", "high", "xhigh", "off",
+  "minimal", "low", "medium", "high", "xhigh", "max", "off",
 ];
 const MODEL_RESOLVE_AVAILABLE_CAP = 20;
 

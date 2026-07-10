@@ -177,5 +177,26 @@ describe("config-api", () => {
       expect(written.reattachPlacement).toBe("preserve");
       expect(written.port).toBe(8000); // existing fields preserved
     });
+
+    it("should persist codexFast and sync pi-codex-fast agent settings", () => {
+      const agentDir = path.join(testDir, ".pi", "agent");
+      const agentSettingsFile = path.join(agentDir, "settings.json");
+      fs.mkdirSync(agentDir, { recursive: true });
+      fs.writeFileSync(agentSettingsFile, JSON.stringify({
+        packages: ["npm:@calesennett/pi-codex-fast"],
+        "pi-codex-fast": { enabled: false, other: "kept" },
+      }));
+      fs.writeFileSync(configFile, JSON.stringify({ port: 8000 }));
+
+      const result = writeConfigPartial({ codexFast: { enabled: true } });
+
+      expect(result.success).toBe(true);
+      expect(result.restartRequired).toBe(false);
+      const written = JSON.parse(fs.readFileSync(configFile, "utf-8"));
+      expect(written.codexFast).toEqual({ enabled: true });
+      const agentSettings = JSON.parse(fs.readFileSync(agentSettingsFile, "utf-8"));
+      expect(agentSettings.packages).toEqual(["npm:@calesennett/pi-codex-fast"]);
+      expect(agentSettings["pi-codex-fast"]).toEqual({ enabled: true, other: "kept" });
+    });
   });
 });
