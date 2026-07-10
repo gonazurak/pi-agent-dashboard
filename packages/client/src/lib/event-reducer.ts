@@ -1046,14 +1046,15 @@ export function reduceEvent(state: SessionState, event: DashboardEvent): Session
           break;
         }
         if (assistantEvent.type === "thinking_end") {
-          if (next.streamingThinking) {
+          const finalThinking = next.streamingThinking || assistantEvent.content || "";
+          if (finalThinking) {
             const startedAt = next.thinkingStartedAt;
             next.messages = [
               ...next.messages,
               {
                 id: `thinking-${next.messages.length}`,
                 role: "thinking",
-                content: next.streamingThinking,
+                content: finalThinking,
                 timestamp: event.timestamp,
                 startedAt,
                 duration: startedAt ? event.timestamp - startedAt : undefined,

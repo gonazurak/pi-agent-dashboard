@@ -725,6 +725,15 @@ describe("thinking events", () => {
     expect(state.messages[0].timestamp).toBe(ts);
   });
 
+  it("should use thinking_end content when the provider emitted no deltas", () => {
+    let state = createInitialState();
+    state = reduceEvent(state, { eventType: "message_update", timestamp: 1000, data: { assistantMessageEvent: { type: "thinking_start", contentIndex: 0 } } });
+    state = reduceEvent(state, { eventType: "message_update", timestamp: 2000, data: { assistantMessageEvent: { type: "thinking_end", contentIndex: 0, content: "Complete reasoning summary" } } });
+    expect(state.messages).toHaveLength(1);
+    expect(state.messages[0].content).toBe("Complete reasoning summary");
+    expect(state.isThinking).toBe(false);
+  });
+
   it("should skip creating thinking message when streamingThinking is empty", () => {
     let state = createInitialState();
     state = reduceEvent(state, {
