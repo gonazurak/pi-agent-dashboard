@@ -223,6 +223,40 @@ export function handleSubscribe(
   piGateway.sendToSession(msg.sessionId, { type: "request_providers", sessionId: msg.sessionId });
   piGateway.sendToSession(msg.sessionId, { type: "request_roles", sessionId: msg.sessionId });
 
+  // Explicit history expansion: reload a larger persisted window without
+  // increasing the default cold-open replay. The client requests this only
+  // after the user clicks "Load earlier messages".
+  const requestedReplayLimit = Math.min(10_000, Math.max(MAX_REPLAY_EVENTS, msg.replayLimit ?? 0));
+  const historySession = sessionManager.get(msg.sessionId);
+  if (msg.replayLimit && requestedReplayLimit > MAX_REPLAY_EVENTS && directoryService && historySession?.sessionFile) {
+    sendTo(ws, { type: "session_state_reset", sessionId: msg.sessionId });
+    sendTo(ws, { type: "event_replay", sessionId: msg.sessionId, events: [], isLast: false });
+    const closeOpenToolCalls = historySession.status === "ended";
+    markReplaying(ws, msg.sessionId);
+    directoryService.loadSessionEvents(
+      msg.sessionId,
+      historySession.sessionFile,
+      historySession.contextWindow,
+      requestedReplayLimit,
+      closeOpenToolCalls,
+    ).then(async (result) => {
+      if (!result.success) {
+        clearReplaying(ws, msg.sessionId, eventStore.getMaxSeq(msg.sessionId));
+        sendTo(ws, { type: "event_replay", sessionId: msg.sessionId, events: [], isLast: true });
+        return;
+      }
+      replaySessionAssets(ws, msg.sessionId, ctx);
+      await sendEventBatches(ws, msg.sessionId, toStoredReplay(result.events), sendTo);
+      clearReplaying(ws, msg.sessionId, eventStore.getMaxSeq(msg.sessionId));
+      replayPendingUiRequests(ws, msg.sessionId);
+      replayUiState(ws, msg.sessionId, ctx);
+    }).catch(() => {
+      clearReplaying(ws, msg.sessionId, eventStore.getMaxSeq(msg.sessionId));
+      sendTo(ws, { type: "event_replay", sessionId: msg.sessionId, events: [], isLast: true });
+    });
+    return;
+  }
+
   if (eventStore.hasEvents(msg.sessionId)) {
     const lastSeq = msg.lastSeq ?? 0;
     const maxSeq = eventStore.getMaxSeq(msg.sessionId);

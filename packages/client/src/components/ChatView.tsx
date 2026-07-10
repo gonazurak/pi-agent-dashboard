@@ -71,6 +71,9 @@ interface Props {
    * session. See change: show-chat-history-loading-indicator.
    */
   loadingHistory?: boolean;
+  /** Expand the persisted replay window by one page. */
+  onLoadOlder?: () => void;
+  canLoadOlder?: boolean;
   // onCancelSteering / onCancelPending omitted: pi exposes no queue-mutation
   // API. Steering bubbles render display-only; cancellation requires upstream
   // pi support (tracked separately). See change: honest-mid-turn-queue-surface.
@@ -193,7 +196,7 @@ export interface ChatViewHandle {
   scrollToTurn: (turnIndex: number) => void;
 }
 
-export const ChatView = forwardRef<ChatViewHandle, Props>(function ChatView({ sessionId, state, toolContext, onRespondToUi, onAbort, onForceKill, onForkFromMessage, onCloseInlineTerminal, queuedTexts, pendingSteering, loadingHistory }, ref) {
+export const ChatView = forwardRef<ChatViewHandle, Props>(function ChatView({ sessionId, state, toolContext, onRespondToUi, onAbort, onForceKill, onForkFromMessage, onCloseInlineTerminal, queuedTexts, pendingSteering, loadingHistory, onLoadOlder, canLoadOlder }, ref) {
   const scrollRef = useRef<HTMLDivElement>(null);
   // True when the user wants the chat to chase new content. Flips to false on
   // any real scroll-up gesture, on explicit navigation (scrollToTurn), and on
@@ -311,6 +314,19 @@ export const ChatView = forwardRef<ChatViewHandle, Props>(function ChatView({ se
   return (
     <div className="flex-1 relative overflow-hidden flex flex-col">
     <div ref={scrollRef} onScroll={handleScroll} style={{ overflowAnchor: "auto" }} className={`h-full overflow-y-auto ${isMobile ? "p-2" : "p-4"} space-y-1`}>
+      {canLoadOlder && state.messages.length > 0 && (
+        <div className="flex justify-center pb-3">
+          <button
+            type="button"
+            data-testid="load-older-messages"
+            onClick={onLoadOlder}
+            disabled={loadingHistory}
+            className="rounded-full border border-[var(--border-secondary)] px-3 py-1 text-xs text-[var(--text-secondary)] hover:bg-[var(--bg-secondary)] disabled:opacity-50"
+          >
+            {loadingHistory ? i18nT("auto.loading_conversation", undefined, "Loading conversation&") : i18nT("auto.load_older_messages", undefined, "Load earlier messages")}
+          </button>
+        </div>
+      )}
       {groupedMessages.map((item, idx) => {
         // Collapsed group of repeated tool calls
         if ((item as ToolCallGroup).type === "group") {

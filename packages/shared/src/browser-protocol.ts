@@ -751,6 +751,8 @@ export interface SubscribeMessage {
   type: "subscribe";
   sessionId: string;
   lastSeq?: number;
+  /** Explicit persisted replay window requested by the user. Normal subscriptions omit this. */
+  replayLimit?: number;
 }
 
 export interface UnsubscribeMessage {

@@ -466,6 +466,7 @@ export default function App() {
   // and the first content / terminal / failure / timeout. Drives the
   // ChatView loading indicator. See change: show-chat-history-loading-indicator.
   const [loadingHistory, setLoadingHistory] = useState<Map<string, boolean>>(new Map());
+  const [historyReplayLimits, setHistoryReplayLimits] = useState<Map<string, number>>(new Map());
   const loadingHistoryTimersRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
   // After overlay-url-routing: shell overlays are URL-driven via the
   // useRoute matches declared above. `previewState`, `specsBrowserCwd`,
@@ -1438,7 +1439,7 @@ export default function App() {
             </div>
           }>
             <SessionAssetsProvider assets={selectedSession?.assets}>
-            <ChatView ref={chatViewRef} sessionId={selectedId} state={selectedState} toolContext={toolContext} queuedTexts={queuedTextsForSelected} onRespondToUi={handleRespondToUi} onAbort={handleAbort} onForceKill={handleForceKill} onForkFromMessage={selectedId ? (entryId) => handleResumeSession(selectedId, "fork", entryId) : undefined} onCloseInlineTerminal={selectedId ? (tid) => handleCloseInlineTerminal(selectedId, tid) : undefined} pendingSteering={selectedSession?.pendingQueues?.steering ?? []} loadingHistory={selectedId ? loadingHistory.get(selectedId) ?? false : false} />
+            <ChatView ref={chatViewRef} sessionId={selectedId} state={selectedState} toolContext={toolContext} queuedTexts={queuedTextsForSelected} onRespondToUi={handleRespondToUi} onAbort={handleAbort} onForceKill={handleForceKill} onForkFromMessage={selectedId ? (entryId) => handleResumeSession(selectedId, "fork", entryId) : undefined} onCloseInlineTerminal={selectedId ? (tid) => handleCloseInlineTerminal(selectedId, tid) : undefined} pendingSteering={selectedSession?.pendingQueues?.steering ?? []} loadingHistory={selectedId ? loadingHistory.get(selectedId) ?? false : false} canLoadOlder={Boolean(selectedId && (historyReplayLimits.get(selectedId) ?? 1000) < 10000)} onLoadOlder={selectedId ? () => { const nextLimit = Math.min(10000, (historyReplayLimits.get(selectedId) ?? 1000) + 1000); setHistoryReplayLimits((prev) => new Map(prev).set(selectedId, nextLimit)); beginLoadingHistory(selectedId); send({ type: "subscribe", sessionId: selectedId, lastSeq: 0, replayLimit: nextLimit }); } : undefined} />
             </SessionAssetsProvider>
           </ErrorBoundary>
           {/* Unified status banner. Sticky above the command input — picks
