@@ -224,10 +224,14 @@ export function toModelInfo(m: any): {
   const thinkingLevelMap = m?.thinkingLevelMap && typeof m.thinkingLevelMap === "object"
     ? m.thinkingLevelMap as Record<string, string | null>
     : {};
+  const baseThinkingLevels = ["off", "minimal", "low", "medium", "high"].filter(
+    (level) => !(level in thinkingLevelMap) || thinkingLevelMap[level] !== null,
+  );
+  const extendedThinkingLevels = ["xhigh", "max"].filter(
+    (level) => typeof thinkingLevelMap[level] === "string",
+  );
   const thinkingLevels = m?.reasoning === true
-    ? ["off", "minimal", "low", "medium", "high", "xhigh", "max"].filter(
-        (level) => !(level in thinkingLevelMap) || thinkingLevelMap[level] !== null,
-      )
+    ? [...baseThinkingLevels, ...extendedThinkingLevels]
     : ["off"];
   return {
     provider,

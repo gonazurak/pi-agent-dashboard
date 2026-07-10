@@ -12,10 +12,17 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { enrichModelMetadata, type CatalogProbe } from "../provider-register.js";
+import { enrichModelMetadata, toModelInfo, type CatalogProbe } from "../provider-register.js";
 
 // Minimal fake catalog mirroring a subset of pi-ai's real MODELS export.
 // Keys are `${provider}|${id}` so our probe is a single Map lookup.
+describe("toModelInfo thinking capabilities", () => {
+  it("requires xhigh and max to be explicitly opted in", () => {
+    expect(toModelInfo({ provider: "openai-codex", id: "gpt-5.5", reasoning: true, thinkingLevelMap: { xhigh: "xhigh" } }).thinkingLevels).toEqual(["off", "minimal", "low", "medium", "high", "xhigh"]);
+    expect(toModelInfo({ provider: "openai-codex", id: "gpt-5.6-sol", reasoning: true, thinkingLevelMap: { xhigh: "xhigh", max: "max" } }).thinkingLevels).toEqual(["off", "minimal", "low", "medium", "high", "xhigh", "max"]);
+  });
+});
+
 const FAKE_CATALOG = new Map<string, any>([
   [
     "anthropic|claude-opus-4-7",
